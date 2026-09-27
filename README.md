@@ -39,8 +39,9 @@ app/
   storage.py     SQLite: история и очередь отложенных ответов
   tts.py         очистка текста для озвучки
   commands.py    распознавание служебных команд
-tests/           pytest (57 тестов)
-deploy/          Caddyfile и systemd-юнит
+tests/           pytest
+run.py           запуск uvicorn (читает WEBAPP_HOST/WEBAPP_PORT)
+manage.sh        install/update/backup/restore/doctor/caddy (itdevlog/manage)
 ```
 
 ## Переменные окружения
@@ -57,6 +58,9 @@ deploy/          Caddyfile и systemd-юнит
 | `REQUEST_DEADLINE_SECONDS` | `3.5` | внутренний дедлайн ответа |
 | `MAX_TOKENS` | `400` | лимит токенов ответа (меньше = быстрее) |
 | `HISTORY_LIMIT` | `10` | сколько последних реплик подавать в контекст |
+| `WEBAPP_HOST` | `127.0.0.1` | адрес веб-сервера (наружу отдаёт Caddy) |
+| `WEBAPP_PORT` | `8000` | порт веб-сервера |
+| `WEBAPP_URL` | `https://alice.example.com` | публичный HTTPS-URL (для `./manage.sh caddy`) |
 
 ## Локальный запуск
 
@@ -65,6 +69,8 @@ python3 -m venv .venv
 .venv/bin/pip install -r requirements.txt
 cp .env.example .env   # впишите OPENCODE_API_KEY
 .venv/bin/uvicorn app.main:create_app --factory --reload
+# либо через точку входа (читает WEBAPP_HOST/WEBAPP_PORT):
+.venv/bin/python run.py
 ```
 
 Проверка:
@@ -84,51 +90,54 @@ curl -s -X POST http://127.0.0.1:8000/alice \
 .venv/bin/python -m ruff check app tests
 ```
 
-## Деплой на Debian 12
+## Эксплуатация на Debian 12 (manage.sh)
 
-### 1. Пользователь и код
+Проект включает `manage.sh` из шаблона [itdevlog/manage](https://github.com/itdevlog/manage):
+установка, обновление, бэкапы, диагностика и HTTPS в одном скрипте.
 
-```bash
-sudo useradd --system --home /opt/alice-skill --shell /usr/sbin/nologin alice
-sudo mkdir -p /opt/alice-skill
-sudo chown alice:alice /opt/alice-skill
-# скопируйте файлы проекта в /opt/alice-skill (git clone / rsync / scp)
-```
-
-### 2. Окружение
+### Быстрый старт
 
 ```bash
-cd /opt/alice-skill
-sudo -u alice python3 -m venv .venv
-sudo -u alice .venv/bin/pip install -r requirements.txt
-sudo -u alice cp .env.example .env
-sudo -u alice nano .env               # впишите OPENCODE_API_KEY
-sudo chmod 600 .env
+cd /opt/alice-opencode      # каталог с проектом
+./manage.sh install         # venv, зависимости, .env, systemd-сервис
+nano .env                   # впишите OPENCODE_API_KEY
+./manage.sh doctor          # проверка конфигурации
+./manage.sh caddy           # HTTPS по WEBAPP_URL (нужны DNS + порты 80/443)
 ```
 
-### 3. systemd
+Быстрая установка с нуля (клонирует репозиторий в `/opt/alice-opencode`):
 
 ```bash
-sudo cp deploy/alice-skill.service /etc/systemd/system/
-sudo systemctl daemon-reload
-sudo systemctl enable --now alice-skill
-systemctl status alice-skill
-curl -s http://127.0.0.1:8000/healthz
+curl -fsSL https://raw.githubusercontent.com/itdevlog/alice-opencode/master/manage.sh | bash -s -- install
 ```
 
-### 4. HTTPS через Caddy
+Приватный репозиторий по `curl | bash` не клонируется без авторизации — тогда
+используйте обычный `git clone` и `./manage.sh install`.
 
-```bash
-# установите Caddy по официальной инструкции caddyserver.com/docs/install
-sudo cp deploy/Caddyfile /etc/caddy/Caddyfile   # при необходимости замените домен
-sudo systemctl reload caddy
-```
+### Команды
 
-DNS: A-запись домена (например, `alice.example.com`) должна указывать на IP сервера,
-порты 80 и 443 — открыты. Caddy сам получит сертификат Let's Encrypt.
+| Команда | Действие |
+|---|---|
+| `install` | venv, зависимости, `.env`, systemd |
+| `update` | обновление из GitHub + бэкап + автoоткат при сбое |
+| `start` / `stop` / `restart` | управление сервисом |
+| `status` / `logs` | статус и логи |
+| `backup` / `restore` | бэкап и восстановление `.env` и SQLite |
+| `doctor` | диагностика окружения |
+| `caddy` | HTTPS reverse proxy для `WEBAPP_URL` |
+| `uninstall` | остановка и удаление сервиса |
+| `help` | справка |
+
+Несколько инстансов на одном сервере: `./manage.sh --instance ИМЯ <команда>`.
+
+### DNS и HTTPS
+
+A-запись домена (например, `alice.example.com`) должна указывать на IP сервера, порты
+80 и 443 — открыты. `./manage.sh caddy` сам установит Caddy, выпустит
+сертификат Let's Encrypt и настроит проксирование на `127.0.0.1:8000`.
 Проверка: `curl -s https://alice.example.com/healthz`.
 
-### 5. Подключение навыка
+### Подключение навыка
 
 1. Откройте консоль [dialogs.yandex.ru/developer](https://dialogs.yandex.ru/developer).
 2. Создайте **Навык → Диалог**.

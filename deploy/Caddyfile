@@ -1,0 +1,6 @@
+# Если домен уже занят другим сайтом, замените alice.example.com на поддомен
+# (например, alice.alice.example.com) и добавьте соответствующую A-запись в DNS.
+alice.example.com {
+	encode gzip
+	reverse_proxy 127.0.0.1:8000
+}

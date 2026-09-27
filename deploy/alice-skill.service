@@ -1,0 +1,23 @@
+[Unit]
+Description=Alice skill webhook (OpenCode Go / DeepSeek)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=alice
+Group=alice
+WorkingDirectory=/opt/alice-skill
+EnvironmentFile=/opt/alice-skill/.env
+ExecStart=/opt/alice-skill/.venv/bin/uvicorn app.main:create_app --factory --host 127.0.0.1 --port 8000
+Restart=on-failure
+RestartSec=3
+
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/alice-skill/data
+
+[Install]
+WantedBy=multi-user.target

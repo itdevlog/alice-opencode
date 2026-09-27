@@ -1,0 +1,141 @@
+import asyncio
+import json
+import logging
+from collections.abc import AsyncIterator
+from dataclasses import dataclass
+from typing import Protocol
+
+import httpx
+
+from app.commands import ERROR_TEXT
+from app.config import Settings
+from app.storage import Storage
+
+logger = logging.getLogger(__name__)
+
+
+@dataclass
+class AnswerResult:
+    text: str | None
+    is_pending: bool = False
+
+
+def extract_delta(line: str) -> str | None:
+    if not line or not line.startswith("data:"):
+        return None
+    data = line[len("data:"):].strip()
+    if not data or data == "[DONE]":
+        return None
+    try:
+        payload = json.loads(data)
+    except json.JSONDecodeError:
+        return None
+    choices = payload.get("choices") or []
+    if not choices:
+        return None
+    delta = choices[0].get("delta") or {}
+    content = delta.get("content")
+    if not content:
+        return None
+    return content
+
+
+class ChatTransport(Protocol):
+    def stream(self, messages: list[dict[str, str]]) -> AsyncIterator[str]: ...
+
+
+class OpenCodeGoTransport:
+    def __init__(self, settings: Settings, client: httpx.AsyncClient | None = None):
+        self._settings = settings
+        self._client = client or httpx.AsyncClient(timeout=httpx.Timeout(60.0, connect=5.0))
+
+    async def stream(self, messages: list[dict[str, str]]) -> AsyncIterator[str]:
+        payload = {
+            "model": self._settings.model,
+            "messages": messages,
+            "stream": True,
+            "max_tokens": self._settings.max_tokens,
+        }
+        headers = {
+            "Authorization": f"Bearer {self._settings.opencode_api_key}",
+            "Content-Type": "application/json",
+        }
+        url = f"{self._settings.opencode_base_url.rstrip('/')}/chat/completions"
+        async with self._client.stream(
+            "POST", url, json=payload, headers=headers
+        ) as response:
+            response.raise_for_status()
+            async for line in response.aiter_lines():
+                delta = extract_delta(line)
+                if delta is not None:
+                    yield delta
+
+    async def aclose(self) -> None:
+        await self._client.aclose()
+
+
+class LlmService:
+    def __init__(
+        self,
+        settings: Settings,
+        storage: Storage,
+        transport: ChatTransport | None = None,
+    ):
+        self._settings = settings
+        self._storage = storage
+        self._transport = transport or OpenCodeGoTransport(settings)
+        self._tasks: set[asyncio.Task] = set()
+
+    async def answer(
+        self,
+        user_id: str,
+        messages: list[dict[str, str]],
+        deadline: float | None = None,
+    ) -> AnswerResult:
+        timeout = self._settings.request_deadline_seconds if deadline is None else deadline
+        task: asyncio.Task = asyncio.create_task(self._collect(messages))
+        self._register(task)
+        try:
+            text = await asyncio.wait_for(asyncio.shield(task), timeout=timeout)
+        except TimeoutError:
+            question = messages[-1]["content"] if messages else ""
+            self._storage.save_pending(user_id, question)
+            self._spawn_background(user_id, task)
+            return AnswerResult(text=None, is_pending=True)
+        except Exception:
+            logger.exception("LLM request failed")
+            return AnswerResult(text=ERROR_TEXT)
+        text = text.strip()
+        if not text:
+            return AnswerResult(text=ERROR_TEXT)
+        return AnswerResult(text=text)
+
+    async def _collect(self, messages: list[dict[str, str]]) -> str:
+        parts: list[str] = []
+        async for delta in self._transport.stream(messages):
+            parts.append(delta)
+        return "".join(parts)
+
+    def _spawn_background(self, user_id: str, task: asyncio.Task) -> None:
+        async def finish() -> None:
+            try:
+                text = (await task).strip() or ERROR_TEXT
+            except Exception:
+                logger.exception("Background LLM request failed")
+                text = ERROR_TEXT
+            self._storage.set_pending_answer(user_id, text)
+
+        self._register(asyncio.create_task(finish()))
+
+    def _register(self, task: asyncio.Task) -> None:
+        self._tasks.add(task)
+        task.add_done_callback(self._tasks.discard)
+
+    async def wait_background(self) -> None:
+        while self._tasks:
+            await asyncio.gather(*list(self._tasks), return_exceptions=True)
+
+    async def aclose(self) -> None:
+        aclose = getattr(self._transport, "aclose", None)
+        if aclose is not None:
+            await aclose()

@@ -113,6 +113,52 @@ async def test_question_calls_llm_with_system_history_and_stores_messages(storag
     ]
 
 
+async def test_name_command_saves_fact_without_llm(storage):
+    handler, llm = make_handler(storage)
+    response = await handler.handle(make_request(text="меня зовут Иван"))
+    assert response["response"]["text"] == "Хорошо, буду звать тебя Иван."
+    assert storage.get_fact("u1", "name") == "Иван"
+    assert llm.calls == []
+
+
+async def test_city_command_saves_fact(storage):
+    handler, llm = make_handler(storage)
+    await handler.handle(make_request(text="мой город Казань"))
+    assert storage.get_fact("u1", "city") == "Казань"
+    assert llm.calls == []
+
+
+async def test_note_command_saves_note(storage):
+    handler, _ = make_handler(storage)
+    response = await handler.handle(make_request(text="запомни: я люблю кофе"))
+    assert storage.get_fact("u1", "notes") == "я люблю кофе"
+    assert response["response"]["text"] == "Запомнил."
+
+
+async def test_forget_command_clears_facts(storage):
+    storage.set_fact("u1", "name", "Иван")
+    handler, _ = make_handler(storage)
+    response = await handler.handle(make_request(text="забудь обо мне"))
+    assert storage.get_facts("u1") == {}
+    assert response["response"]["text"] == "Хорошо, я забыл всё, что знал о тебе."
+
+
+async def test_show_facts_lists_known_facts(storage):
+    storage.set_fact("u1", "name", "Иван")
+    handler, llm = make_handler(storage)
+    response = await handler.handle(make_request(text="что ты обо мне знаешь"))
+    assert "Иван" in response["response"]["text"]
+    assert llm.calls == []
+
+
+async def test_known_facts_are_injected_into_system_prompt(storage):
+    storage.set_fact("u1", "name", "Иван")
+    handler, llm = make_handler(storage)
+    await handler.handle(make_request(text="вопрос"))
+    _, messages = llm.calls[0]
+    assert "Иван" in messages[0]["content"]
+
+
 async def test_system_prompt_includes_request_timezone(storage):
     handler, llm = make_handler(storage)
     await handler.handle(make_request(text="привет", timezone="Asia/Yekaterinburg"))

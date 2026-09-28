@@ -51,6 +51,17 @@ class Storage:
                 )
                 """
             )
+            self._conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS facts (
+                    user_id TEXT NOT NULL,
+                    key TEXT NOT NULL,
+                    value TEXT NOT NULL,
+                    updated REAL NOT NULL,
+                    PRIMARY KEY (user_id, key)
+                )
+                """
+            )
 
     def add_message(self, user_id: str, role: str, content: str) -> None:
         with self._lock, self._conn:
@@ -104,6 +115,36 @@ class Storage:
             with self._lock, self._conn:
                 self._conn.execute("DELETE FROM pending WHERE user_id = ?", (user_id,))
         return pending
+
+    def set_fact(self, user_id: str, key: str, value: str) -> None:
+        with self._lock, self._conn:
+            self._conn.execute(
+                """
+                INSERT INTO facts (user_id, key, value, updated)
+                VALUES (?, ?, ?, ?)
+                ON CONFLICT(user_id, key) DO UPDATE SET value = excluded.value,
+                    updated = excluded.updated
+                """,
+                (user_id, key, value, time.time()),
+            )
+
+    def get_facts(self, user_id: str) -> dict[str, str]:
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT key, value FROM facts WHERE user_id = ?", (user_id,)
+            ).fetchall()
+        return {row["key"]: row["value"] for row in rows}
+
+    def get_fact(self, user_id: str, key: str) -> str | None:
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT value FROM facts WHERE user_id = ? AND key = ?", (user_id, key)
+            ).fetchone()
+        return row["value"] if row is not None else None
+
+    def delete_facts(self, user_id: str) -> None:
+        with self._lock, self._conn:
+            self._conn.execute("DELETE FROM facts WHERE user_id = ?", (user_id,))
 
     def close(self) -> None:
         with self._lock:

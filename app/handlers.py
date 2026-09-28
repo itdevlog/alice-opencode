@@ -1,8 +1,14 @@
-from app import commands
+from app import commands, personalization
 from app.clock import datetime_note
 from app.commands import Command, detect_command, normalize
 from app.config import Settings
 from app.llm import LlmService
+from app.personalization import (
+    FactCommand,
+    FactKind,
+    format_facts_prompt,
+    parse_fact_command,
+)
 from app.protocol import AliceRequest, build_response
 from app.storage import Storage
 from app.tts import clean_for_speech
@@ -31,6 +37,10 @@ class SkillHandler:
         if command is Command.EXIT:
             return self._reply(request, commands.EXIT_TEXT, end_session=True)
 
+        fact_command = parse_fact_command(raw)
+        if fact_command is not None:
+            return self._handle_fact(request, user_id, fact_command)
+
         pending = self._storage.get_pending(user_id)
         if pending is not None:
             if pending.is_ready:
@@ -43,7 +53,12 @@ class SkillHandler:
             return self._reply(request, commands.NO_PENDING_TEXT)
 
         timezone_name = (request.raw.get("meta") or {}).get("timezone")
-        system_content = f"{datetime_note(timezone_name)} {self._settings.system_prompt}"
+        facts_prompt = format_facts_prompt(self._storage.get_facts(user_id))
+        system_content = " ".join(
+            part
+            for part in (datetime_note(timezone_name), facts_prompt, self._settings.system_prompt)
+            if part
+        )
         history = self._storage.get_history(user_id, self._settings.history_limit)
         messages = [{"role": "system", "content": system_content}]
         messages.extend(history)
@@ -55,6 +70,24 @@ class SkillHandler:
             return self._reply(request, commands.PENDING_HINT)
         self._storage.add_message(user_id, "assistant", result.text)
         return self._reply(request, result.text)
+
+    def _handle_fact(
+        self, request: AliceRequest, user_id: str, command: FactCommand
+    ) -> dict:
+        storage = self._storage
+        if command.kind is FactKind.NAME:
+            storage.set_fact(user_id, "name", command.value)
+            return self._reply(request, personalization.NAME_SAVED.format(name=command.value))
+        if command.kind is FactKind.CITY:
+            storage.set_fact(user_id, "city", command.value)
+            return self._reply(request, personalization.CITY_SAVED.format(city=command.value))
+        if command.kind is FactKind.NOTE:
+            storage.set_fact(user_id, "notes", command.value)
+            return self._reply(request, personalization.NOTE_SAVED)
+        if command.kind is FactKind.SHOW:
+            return self._reply(request, personalization.facts_reply(storage.get_facts(user_id)))
+        storage.delete_facts(user_id)
+        return self._reply(request, personalization.FORGET_FACTS_TEXT)
 
     def _reply(self, request: AliceRequest, text: str, end_session: bool = False) -> dict:
         speech = clean_for_speech(text)

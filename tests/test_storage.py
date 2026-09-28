@@ -69,3 +69,29 @@ def test_pop_pending_removes_it(storage):
 
 def test_pop_pending_returns_none_when_absent(storage):
     assert storage.pop_pending("none") is None
+
+
+def test_set_and_get_facts(storage):
+    storage.set_fact("u1", "name", "Иван")
+    storage.set_fact("u1", "city", "Казань")
+    assert storage.get_facts("u1") == {"name": "Иван", "city": "Казань"}
+
+
+def test_get_fact_returns_none_when_absent(storage):
+    storage.set_fact("u1", "name", "Иван")
+    assert storage.get_fact("u1", "name") == "Иван"
+    assert storage.get_fact("u1", "city") is None
+
+
+def test_set_fact_overwrites(storage):
+    storage.set_fact("u1", "name", "Иван")
+    storage.set_fact("u1", "name", "Пётр")
+    assert storage.get_fact("u1", "name") == "Пётр"
+
+
+def test_delete_facts_affects_only_given_user(storage):
+    storage.set_fact("u1", "name", "Иван")
+    storage.set_fact("u2", "name", "Пётр")
+    storage.delete_facts("u1")
+    assert storage.get_facts("u1") == {}
+    assert storage.get_facts("u2") == {"name": "Пётр"}

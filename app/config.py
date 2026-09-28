@@ -6,9 +6,12 @@ from dotenv import load_dotenv
 load_dotenv()
 
 DEFAULT_SYSTEM_PROMPT = (
-    "Ты голосовой ассистент Алисы. Отвечай по-русски, кратко и по делу. "
-    "Пиши простыми предложениями без markdown, списков, ссылок и эмодзи: "
-    "твой ответ будет произнесён вслух. Если не знаешь ответа — честно скажи об этом."
+    "Ты полезный голосовой ассистент Алисы. Отвечай по-русски, по существу и с пользой: "
+    "обычно двумя-четырьмя предложениями, а если вопрос требует подробностей — до шести. "
+    "Давай конкретику: факты, примеры, шаги. Не отказывайся и не отговаривайся, если "
+    "ответ есть в твоих знаниях. Не выдумывай данные, которых не знаешь, но честно "
+    "называй только реальные ограничения. Формат — устная речь: без markdown, списков, "
+    "ссылок, эмодзи и спецсимволов."
 )
 
 
@@ -39,7 +42,7 @@ def load_settings() -> Settings:
         db_path=_env("DB_PATH", "data/alice.db"),
         skill_id=_env("SKILL_ID", "") or None,
         request_deadline_seconds=float(_env("REQUEST_DEADLINE_SECONDS", "3.5")),
-        max_tokens=int(_env("MAX_TOKENS", "400")),
+        max_tokens=int(_env("MAX_TOKENS", "600")),
         history_limit=int(_env("HISTORY_LIMIT", "10")),
         system_prompt=_env("SYSTEM_PROMPT", DEFAULT_SYSTEM_PROMPT),
     )

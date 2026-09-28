@@ -24,9 +24,10 @@ def make_settings(**overrides):
     return Settings(**base)
 
 
-def make_request(text="привет", is_new=False, user="u1"):
+def make_request(text="привет", is_new=False, user="u1", timezone="UTC"):
     payload = {
         "version": "1.0",
+        "meta": {"timezone": timezone},
         "request": {"original_utterance": text, "type": "SimpleUtterance"},
         "session": {
             "new": is_new,
@@ -101,13 +102,22 @@ async def test_question_calls_llm_with_system_history_and_stores_messages(storag
     assert response["response"]["tts"] == "Ответ"
     user_id, messages = llm.calls[0]
     assert user_id == "u1"
-    assert messages[0] == {"role": "system", "content": "SYS"}
+    assert messages[0]["role"] == "system"
+    assert "SYS" in messages[0]["content"]
+    assert "Сейчас" in messages[0]["content"]
     assert messages[-1] == {"role": "user", "content": "вопрос"}
     assert storage.get_history("u1", limit=10) == [
         {"role": "user", "content": "прошлое"},
         {"role": "user", "content": "вопрос"},
         {"role": "assistant", "content": "**Ответ**"},
     ]
+
+
+async def test_system_prompt_includes_request_timezone(storage):
+    handler, llm = make_handler(storage)
+    await handler.handle(make_request(text="привет", timezone="Asia/Yekaterinburg"))
+    _, messages = llm.calls[0]
+    assert "(Asia/Yekaterinburg)" in messages[0]["content"]
 
 
 async def test_pending_result_returns_hint_and_does_not_store_assistant(storage):

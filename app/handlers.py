@@ -1,4 +1,5 @@
 from app import commands
+from app.clock import datetime_note
 from app.commands import Command, detect_command, normalize
 from app.config import Settings
 from app.llm import LlmService
@@ -41,8 +42,10 @@ class SkillHandler:
         if command is Command.CONTINUE:
             return self._reply(request, commands.NO_PENDING_TEXT)
 
+        timezone_name = (request.raw.get("meta") or {}).get("timezone")
+        system_content = f"{datetime_note(timezone_name)} {self._settings.system_prompt}"
         history = self._storage.get_history(user_id, self._settings.history_limit)
-        messages = [{"role": "system", "content": self._settings.system_prompt}]
+        messages = [{"role": "system", "content": system_content}]
         messages.extend(history)
         messages.append({"role": "user", "content": raw})
         self._storage.add_message(user_id, "user", raw)

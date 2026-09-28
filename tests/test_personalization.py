@@ -5,6 +5,7 @@ from app.personalization import (
     facts_reply,
     format_facts_prompt,
     parse_fact_command,
+    style_hint,
 )
 
 
@@ -53,6 +54,29 @@ def test_format_facts_prompt_includes_values():
     assert "Иван" in prompt
     assert "Казань" in prompt
     assert "любит кофе" in prompt
+
+
+def test_format_facts_prompt_skips_style():
+    prompt = format_facts_prompt({"name": "Иван", "style": "short"})
+    assert "Иван" in prompt
+    assert "short" not in prompt
+
+
+@pytest.mark.parametrize(
+    ("style", "needle"),
+    [
+        ("short", "кратко"),
+        ("detailed", "подробно"),
+        ("normal", "обычн"),
+    ],
+)
+def test_style_hint_returns_instruction(style, needle):
+    assert needle in style_hint(style).lower()
+
+
+def test_style_hint_empty_for_unknown():
+    assert style_hint(None) == ""
+    assert style_hint("unknown") == ""
 
 
 def test_facts_reply_without_facts():

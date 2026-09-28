@@ -78,6 +78,15 @@ class Storage:
             ).fetchall()
         return [{"role": r["role"], "content": r["content"]} for r in reversed(rows)]
 
+    def get_last_assistant(self, user_id: str) -> str | None:
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT content FROM messages WHERE user_id = ? AND role = 'assistant' "
+                "ORDER BY id DESC LIMIT 1",
+                (user_id,),
+            ).fetchone()
+        return row["content"] if row is not None else None
+
     def clear_history(self, user_id: str) -> None:
         with self._lock, self._conn:
             self._conn.execute("DELETE FROM messages WHERE user_id = ?", (user_id,))

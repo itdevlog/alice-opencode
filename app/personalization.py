@@ -11,6 +11,12 @@ FACTS_HEADER = "Вот что я о тебе знаю:"
 
 _LABELS = {"name": "имя", "city": "город", "notes": "заметки", "style": "стиль ответов"}
 
+_STYLE_HINTS = {
+    "short": "Отвечай максимально кратко — одним-двумя предложениями.",
+    "detailed": "Отвечай подробно и развёрнуто, до шести-восьми предложений.",
+    "normal": "Отвечай в обычном объёме — двумя-четырьмя предложениями.",
+}
+
 
 class FactKind(StrEnum):
     NAME = "name"
@@ -73,10 +79,17 @@ def parse_fact_command(text: str) -> FactCommand | None:
     return None
 
 
-def format_facts_prompt(facts: dict[str, str]) -> str:
-    if not facts:
+def style_hint(style: str | None) -> str:
+    if not style:
         return ""
-    parts = [f"{_LABELS.get(key, key)} — {value}" for key, value in facts.items()]
+    return _STYLE_HINTS.get(style, "")
+
+
+def format_facts_prompt(facts: dict[str, str]) -> str:
+    items = [(key, value) for key, value in facts.items() if key != "style"]
+    if not items:
+        return ""
+    parts = [f"{_LABELS.get(key, key)} — {value}" for key, value in items]
     return "Известно о пользователе: " + "; ".join(parts) + "."
 
 

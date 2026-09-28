@@ -113,6 +113,51 @@ async def test_question_calls_llm_with_system_history_and_stores_messages(storag
     ]
 
 
+async def test_repeat_returns_last_assistant_answer(storage):
+    storage.add_message("u1", "assistant", "прошлый ответ")
+    handler, llm = make_handler(storage)
+    response = await handler.handle(make_request(text="повтори"))
+    assert response["response"]["text"] == "прошлый ответ"
+    assert llm.calls == []
+
+
+async def test_repeat_without_history(storage):
+    handler, llm = make_handler(storage)
+    response = await handler.handle(make_request(text="повтори"))
+    assert "нечего" in response["response"]["text"].lower()
+    assert llm.calls == []
+
+
+async def test_style_command_sets_preference(storage):
+    handler, llm = make_handler(storage)
+    response = await handler.handle(make_request(text="короче"))
+    assert storage.get_fact("u1", "style") == "short"
+    assert response["response"]["text"] == commands.STYLE_SET_TEXT["short"]
+    assert llm.calls == []
+
+
+async def test_style_hint_is_injected_into_system_prompt(storage):
+    storage.set_fact("u1", "style", "detailed")
+    handler, llm = make_handler(storage)
+    await handler.handle(make_request(text="вопрос"))
+    _, messages = llm.calls[0]
+    assert "подробн" in messages[0]["content"].lower()
+
+
+async def test_pending_hint_has_pause_in_tts(storage):
+    handler, _ = make_handler(storage, AnswerResult(text=None, is_pending=True))
+    response = await handler.handle(make_request(text="сложный вопрос"))
+    assert response["response"]["text"] == commands.PENDING_HINT
+    assert "sil" in response["response"]["tts"]
+
+
+async def test_pending_hint_uses_wait_sound_when_configured(storage):
+    llm = FakeLlm(AnswerResult(text=None, is_pending=True))
+    handler = SkillHandler(make_settings(wait_sound="dialogs-upload/sound.opus"), storage, llm)
+    response = await handler.handle(make_request(text="сложный вопрос"))
+    assert "speaker audio" in response["response"]["tts"]
+
+
 async def test_name_command_saves_fact_without_llm(storage):
     handler, llm = make_handler(storage)
     response = await handler.handle(make_request(text="меня зовут Иван"))

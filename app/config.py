@@ -26,6 +26,7 @@ class Settings:
     max_tokens: int
     history_limit: int
     system_prompt: str
+    wait_sound: str = ""
 
 
 def _env(name: str, default: str) -> str:
@@ -45,4 +46,5 @@ def load_settings() -> Settings:
         max_tokens=int(_env("MAX_TOKENS", "600")),
         history_limit=int(_env("HISTORY_LIMIT", "10")),
         system_prompt=_env("SYSTEM_PROMPT", DEFAULT_SYSTEM_PROMPT),
+        wait_sound=_env("WAIT_SOUND", ""),
     )

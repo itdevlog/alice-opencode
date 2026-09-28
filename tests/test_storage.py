@@ -71,6 +71,17 @@ def test_pop_pending_returns_none_when_absent(storage):
     assert storage.pop_pending("none") is None
 
 
+def test_get_last_assistant_returns_latest(storage):
+    storage.add_message("u1", "user", "вопрос")
+    storage.add_message("u1", "assistant", "первый")
+    storage.add_message("u1", "assistant", "второй")
+    assert storage.get_last_assistant("u1") == "второй"
+
+
+def test_get_last_assistant_none_when_absent(storage):
+    assert storage.get_last_assistant("u1") is None
+
+
 def test_set_and_get_facts(storage):
     storage.set_fact("u1", "name", "Иван")
     storage.set_fact("u1", "city", "Казань")

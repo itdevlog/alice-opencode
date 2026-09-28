@@ -53,6 +53,11 @@ def chat_completions_url(base: str) -> str:
         )
     if base.endswith("/chat/completions"):
         return base
+    lowered = base.lower()
+    if lowered in ("https://opencode.ai", "http://opencode.ai"):
+        return f"{base}/zen/go/v1/chat/completions"
+    if lowered.endswith("/zen/go"):
+        return f"{base}/v1/chat/completions"
     return f"{base}/chat/completions"
 
 
@@ -93,7 +98,7 @@ class OpenCodeGoTransport:
             if response.status_code >= 400:
                 body = (await response.aread()).decode("utf-8", "replace")
                 raise RuntimeError(
-                    f"OpenCode Go HTTP {response.status_code}: {body[:2000]}"
+                    f"OpenCode Go HTTP {response.status_code} for {url}: {body[:2000]}"
                 )
             async for line in response.aiter_lines():
                 delta = extract_delta(line)

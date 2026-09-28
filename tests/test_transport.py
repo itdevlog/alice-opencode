@@ -51,6 +51,10 @@ async def test_transport_sends_agent_headers_and_parses_stream():
 @pytest.mark.parametrize(
     "base",
     [
+        "https://opencode.ai",
+        "https://opencode.ai/",
+        "https://opencode.ai/zen/go",
+        "https://opencode.ai/zen/go/",
         "https://opencode.ai/zen/go/v1",
         "https://opencode.ai/zen/go/v1/",
         "  https://opencode.ai/zen/go/v1  ",
@@ -59,6 +63,12 @@ async def test_transport_sends_agent_headers_and_parses_stream():
 )
 def test_chat_completions_url_normalizes_to_single_endpoint(base):
     assert chat_completions_url(base) == "https://opencode.ai/zen/go/v1/chat/completions"
+
+
+def test_chat_completions_url_appends_for_custom_proxy():
+    assert (
+        chat_completions_url("https://my.proxy/v1") == "https://my.proxy/v1/chat/completions"
+    )
 
 
 def test_chat_completions_url_rejects_missing_scheme():
@@ -95,3 +105,4 @@ async def test_transport_surfaces_error_body():
     message = str(excinfo.value)
     assert "400" in message
     assert "inference_failed" in message
+    assert URL in message

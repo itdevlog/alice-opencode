@@ -13,6 +13,10 @@ from app.storage import Storage
 
 logger = logging.getLogger(__name__)
 
+# OpenCode Go требует идентифицировать клиента собственным User-Agent (не именем
+# HTTP-библиотеки) и передавать стабильный ID диалога в x-opencode-session.
+USER_AGENT = "alice-opencode-skill/1.0"
+
 
 @dataclass
 class AnswerResult:
@@ -41,7 +45,9 @@ def extract_delta(line: str) -> str | None:
 
 
 class ChatTransport(Protocol):
-    def stream(self, messages: list[dict[str, str]]) -> AsyncIterator[str]: ...
+    def stream(
+        self, messages: list[dict[str, str]], session_id: str
+    ) -> AsyncIterator[str]: ...
 
 
 class OpenCodeGoTransport:
@@ -49,7 +55,9 @@ class OpenCodeGoTransport:
         self._settings = settings
         self._client = client or httpx.AsyncClient(timeout=httpx.Timeout(60.0, connect=5.0))
 
-    async def stream(self, messages: list[dict[str, str]]) -> AsyncIterator[str]:
+    async def stream(
+        self, messages: list[dict[str, str]], session_id: str
+    ) -> AsyncIterator[str]:
         payload = {
             "model": self._settings.model,
             "messages": messages,
@@ -59,12 +67,19 @@ class OpenCodeGoTransport:
         headers = {
             "Authorization": f"Bearer {self._settings.opencode_api_key}",
             "Content-Type": "application/json",
+            "Accept": "text/event-stream",
+            "User-Agent": USER_AGENT,
+            "x-opencode-session": session_id,
         }
         url = f"{self._settings.opencode_base_url.rstrip('/')}/chat/completions"
         async with self._client.stream(
             "POST", url, json=payload, headers=headers
         ) as response:
-            response.raise_for_status()
+            if response.status_code >= 400:
+                body = (await response.aread()).decode("utf-8", "replace")
+                raise RuntimeError(
+                    f"OpenCode Go HTTP {response.status_code}: {body[:2000]}"
+                )
             async for line in response.aiter_lines():
                 delta = extract_delta(line)
                 if delta is not None:
@@ -93,7 +108,7 @@ class LlmService:
         deadline: float | None = None,
     ) -> AnswerResult:
         timeout = self._settings.request_deadline_seconds if deadline is None else deadline
-        task: asyncio.Task = asyncio.create_task(self._collect(messages))
+        task: asyncio.Task = asyncio.create_task(self._collect(messages, user_id))
         self._register(task)
         try:
             text = await asyncio.wait_for(asyncio.shield(task), timeout=timeout)
@@ -110,9 +125,9 @@ class LlmService:
             return AnswerResult(text=ERROR_TEXT)
         return AnswerResult(text=text)
 
-    async def _collect(self, messages: list[dict[str, str]]) -> str:
+    async def _collect(self, messages: list[dict[str, str]], session_id: str) -> str:
         parts: list[str] = []
-        async for delta in self._transport.stream(messages):
+        async for delta in self._transport.stream(messages, session_id):
             parts.append(delta)
         return "".join(parts)
 

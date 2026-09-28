@@ -29,7 +29,7 @@ class FakeTransport:
         self.delay = delay
         self.error = error
 
-    async def stream(self, messages):
+    async def stream(self, messages, session_id="test"):
         if self.error is not None:
             if self.delay:
                 await asyncio.sleep(self.delay)

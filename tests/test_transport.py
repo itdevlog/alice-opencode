@@ -3,7 +3,7 @@ import pytest
 import respx
 
 from app.config import Settings
-from app.llm import OpenCodeGoTransport
+from app.llm import OpenCodeGoTransport, chat_completions_url
 
 URL = "http://test.local/v1/chat/completions"
 
@@ -46,6 +46,24 @@ async def test_transport_sends_agent_headers_and_parses_stream():
     assert request.headers["user-agent"].startswith("alice-opencode")
     assert request.headers["x-opencode-session"] == "user-1"
     assert request.headers["accept"] == "text/event-stream"
+
+
+@pytest.mark.parametrize(
+    "base",
+    [
+        "https://opencode.ai/zen/go/v1",
+        "https://opencode.ai/zen/go/v1/",
+        "  https://opencode.ai/zen/go/v1  ",
+        "https://opencode.ai/zen/go/v1/chat/completions",
+    ],
+)
+def test_chat_completions_url_normalizes_to_single_endpoint(base):
+    assert chat_completions_url(base) == "https://opencode.ai/zen/go/v1/chat/completions"
+
+
+def test_chat_completions_url_rejects_missing_scheme():
+    with pytest.raises(ValueError, match="http"):
+        chat_completions_url("opencode.ai/zen/go/v1")
 
 
 async def test_transport_rejects_base_url_without_scheme():

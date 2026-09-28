@@ -44,6 +44,18 @@ def extract_delta(line: str) -> str | None:
     return content
 
 
+def chat_completions_url(base: str) -> str:
+    base = base.strip().rstrip("/")
+    if not base.startswith(("http://", "https://")):
+        raise ValueError(
+            "OPENCODE_BASE_URL должен начинаться с http:// или https://, "
+            f"сейчас: {base!r}"
+        )
+    if base.endswith("/chat/completions"):
+        return base
+    return f"{base}/chat/completions"
+
+
 class ChatTransport(Protocol):
     def stream(
         self, messages: list[dict[str, str]], session_id: str
@@ -56,13 +68,7 @@ class OpenCodeGoTransport:
         self._client = client or httpx.AsyncClient(timeout=httpx.Timeout(60.0, connect=5.0))
 
     def _url(self) -> str:
-        base = self._settings.opencode_base_url
-        if not base.startswith(("http://", "https://")):
-            raise ValueError(
-                "OPENCODE_BASE_URL должен начинаться с http:// или https://, "
-                f"сейчас: {base!r}"
-            )
-        return f"{base.rstrip('/')}/chat/completions"
+        return chat_completions_url(self._settings.opencode_base_url)
 
     async def stream(
         self, messages: list[dict[str, str]], session_id: str

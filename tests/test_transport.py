@@ -48,6 +48,19 @@ async def test_transport_sends_agent_headers_and_parses_stream():
     assert request.headers["accept"] == "text/event-stream"
 
 
+async def test_transport_rejects_base_url_without_scheme():
+    transport = OpenCodeGoTransport(
+        make_settings(opencode_base_url="opencode.ai/zen/go/v1"),
+        client=httpx.AsyncClient(),
+    )
+    try:
+        with pytest.raises(ValueError, match="http"):
+            async for _ in transport.stream([], session_id="s"):
+                pass
+    finally:
+        await transport.aclose()
+
+
 @respx.mock
 async def test_transport_surfaces_error_body():
     respx.post(URL).mock(

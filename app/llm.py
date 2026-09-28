@@ -55,9 +55,19 @@ class OpenCodeGoTransport:
         self._settings = settings
         self._client = client or httpx.AsyncClient(timeout=httpx.Timeout(60.0, connect=5.0))
 
+    def _url(self) -> str:
+        base = self._settings.opencode_base_url
+        if not base.startswith(("http://", "https://")):
+            raise ValueError(
+                "OPENCODE_BASE_URL должен начинаться с http:// или https://, "
+                f"сейчас: {base!r}"
+            )
+        return f"{base.rstrip('/')}/chat/completions"
+
     async def stream(
         self, messages: list[dict[str, str]], session_id: str
     ) -> AsyncIterator[str]:
+        url = self._url()
         payload = {
             "model": self._settings.model,
             "messages": messages,
@@ -71,7 +81,6 @@ class OpenCodeGoTransport:
             "User-Agent": USER_AGENT,
             "x-opencode-session": session_id,
         }
-        url = f"{self._settings.opencode_base_url.rstrip('/')}/chat/completions"
         async with self._client.stream(
             "POST", url, json=payload, headers=headers
         ) as response:

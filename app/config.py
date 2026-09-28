@@ -25,15 +25,21 @@ class Settings:
     system_prompt: str
 
 
+def _env(name: str, default: str) -> str:
+    # Пустая строка в .env (KEY=) должна трактоваться как «не задано», иначе
+    # os.getenv вернёт "" и перебьёт дефолт.
+    return (os.getenv(name) or "").strip() or default
+
+
 def load_settings() -> Settings:
     return Settings(
-        opencode_api_key=os.getenv("OPENCODE_API_KEY", ""),
-        opencode_base_url=os.getenv("OPENCODE_BASE_URL", "https://opencode.ai/zen/go/v1"),
-        model=os.getenv("MODEL", "deepseek-v4.1-flash"),
-        db_path=os.getenv("DB_PATH", "data/alice.db"),
-        skill_id=os.getenv("SKILL_ID") or None,
-        request_deadline_seconds=float(os.getenv("REQUEST_DEADLINE_SECONDS", "3.5")),
-        max_tokens=int(os.getenv("MAX_TOKENS", "400")),
-        history_limit=int(os.getenv("HISTORY_LIMIT", "10")),
-        system_prompt=os.getenv("SYSTEM_PROMPT", DEFAULT_SYSTEM_PROMPT),
+        opencode_api_key=_env("OPENCODE_API_KEY", ""),
+        opencode_base_url=_env("OPENCODE_BASE_URL", "https://opencode.ai/zen/go/v1"),
+        model=_env("MODEL", "deepseek-v4.1-flash"),
+        db_path=_env("DB_PATH", "data/alice.db"),
+        skill_id=_env("SKILL_ID", "") or None,
+        request_deadline_seconds=float(_env("REQUEST_DEADLINE_SECONDS", "3.5")),
+        max_tokens=int(_env("MAX_TOKENS", "400")),
+        history_limit=int(_env("HISTORY_LIMIT", "10")),
+        system_prompt=_env("SYSTEM_PROMPT", DEFAULT_SYSTEM_PROMPT),
     )

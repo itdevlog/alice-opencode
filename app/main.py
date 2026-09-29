@@ -8,6 +8,7 @@ from app.handlers import SkillHandler
 from app.llm import LlmService
 from app.protocol import parse_request
 from app.storage import Storage
+from app.weather import WeatherClient
 
 
 def create_app(
@@ -18,12 +19,15 @@ def create_app(
     settings = settings or load_settings()
     storage = storage or Storage(settings.db_path)
     llm = llm or LlmService(settings, storage)
-    handler = SkillHandler(settings, storage, llm)
+    weather = WeatherClient(timeout=settings.weather_timeout) if settings.weather_enabled else None
+    handler = SkillHandler(settings, storage, llm, weather=weather)
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         yield
         await llm.aclose()
+        if weather is not None:
+            await weather.aclose()
         storage.close()
 
     app = FastAPI(lifespan=lifespan)

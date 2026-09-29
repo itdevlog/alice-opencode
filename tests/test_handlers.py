@@ -6,6 +6,7 @@ from app.handlers import SkillHandler
 from app.llm import AnswerResult
 from app.protocol import parse_request
 from app.storage import Storage
+from app.weather import WEATHER_ASK_CITY, WEATHER_ERROR, Weather
 
 
 def make_settings(**overrides):
@@ -24,11 +25,15 @@ def make_settings(**overrides):
     return Settings(**base)
 
 
-def make_request(text="привет", is_new=False, user="u1", timezone="UTC"):
+def make_request(text="привет", is_new=False, user="u1", timezone="UTC", entities=None):
     payload = {
         "version": "1.0",
         "meta": {"timezone": timezone},
-        "request": {"original_utterance": text, "type": "SimpleUtterance"},
+        "request": {
+            "original_utterance": text,
+            "type": "SimpleUtterance",
+            "nlu": {"tokens": [], "entities": entities or []},
+        },
         "session": {
             "new": is_new,
             "session_id": "s1",
@@ -56,11 +61,24 @@ def storage():
     store.close()
 
 
-def make_handler(storage, result=None):
+class FakeWeather:
+    def __init__(self, weather=None, error=None):
+        self.weather = weather
+        self.error = error
+        self.cities = []
+
+    async def get(self, city):
+        self.cities.append(city)
+        if self.error is not None:
+            raise self.error
+        return self.weather
+
+
+def make_handler(storage, result=None, weather=None):
     if result is None:
         result = AnswerResult(text="ответ", is_pending=False)
     llm = FakeLlm(result)
-    return SkillHandler(make_settings(), storage, llm), llm
+    return SkillHandler(make_settings(), storage, llm, weather=weather), llm
 
 
 async def test_new_empty_session_greets_without_calling_llm(storage):
@@ -111,6 +129,76 @@ async def test_question_calls_llm_with_system_history_and_stores_messages(storag
         {"role": "user", "content": "вопрос"},
         {"role": "assistant", "content": "**Ответ**"},
     ]
+
+
+async def test_weather_by_city(storage):
+    weather = Weather(
+        city="Москва", temperature=5, description="дождь", wind_speed=2, t_min=1, t_max=7
+    )
+    fake = FakeWeather(weather=weather)
+    handler, llm = make_handler(storage, weather=fake)
+    response = await handler.handle(make_request(text="погода в Москве"))
+    assert "Москва" in response["response"]["text"]
+    assert "дождь" in response["response"]["text"]
+    assert fake.cities == ["москве"]
+    assert llm.calls == []
+
+
+async def test_weather_uses_stored_city(storage):
+    storage.set_fact("u1", "city", "Казань")
+    fake = FakeWeather(
+        weather=Weather(city="Казань", temperature=1, description="снег", wind_speed=1)
+    )
+    handler, _ = make_handler(storage, weather=fake)
+    await handler.handle(make_request(text="какая сегодня погода"))
+    assert fake.cities == ["Казань"]
+
+
+async def test_weather_asks_city_when_unknown(storage):
+    fake = FakeWeather()
+    handler, _ = make_handler(storage, weather=fake)
+    response = await handler.handle(make_request(text="погода"))
+    assert response["response"]["text"] == WEATHER_ASK_CITY
+    assert storage.get_fact("u1", "awaiting_city") == "1"
+    assert fake.cities == []
+
+
+async def test_weather_remembers_city_from_followup(storage):
+    storage.set_fact("u1", "awaiting_city", "1")
+    fake = FakeWeather(
+        weather=Weather(city="Сочи", temperature=20, description="ясно", wind_speed=2)
+    )
+    handler, _ = make_handler(storage, weather=fake)
+    response = await handler.handle(make_request(text="Сочи"))
+    assert storage.get_fact("u1", "city") == "Сочи"
+    assert storage.get_fact("u1", "awaiting_city") == ""
+    assert "Сочи" in response["response"]["text"]
+
+
+async def test_weather_uses_nlu_entity_city(storage):
+    fake = FakeWeather(
+        weather=Weather(city="Сочи", temperature=20, description="ясно", wind_speed=2)
+    )
+    handler, _ = make_handler(storage, weather=fake)
+    entities = [{"type": "YANDEX.GEO", "value": {"city": "Сочи"}}]
+    await handler.handle(make_request(text="какая погода", entities=entities))
+    assert fake.cities == ["Сочи"]
+
+
+async def test_weather_error_is_handled(storage):
+    fake = FakeWeather(error=RuntimeError("boom"))
+    handler, _ = make_handler(storage, weather=fake)
+    response = await handler.handle(make_request(text="погода в Москве"))
+    assert response["response"]["text"] == WEATHER_ERROR
+
+
+async def test_weather_disabled_falls_through_to_llm(storage):
+    fake = FakeWeather()
+    llm = FakeLlm(AnswerResult("ответ"))
+    handler = SkillHandler(make_settings(weather_enabled=False), storage, llm, weather=fake)
+    await handler.handle(make_request(text="погода в Москве"))
+    assert fake.cities == []
+    assert llm.calls
 
 
 async def test_repeat_returns_last_assistant_answer(storage):

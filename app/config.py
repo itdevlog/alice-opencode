@@ -27,6 +27,8 @@ class Settings:
     history_limit: int
     system_prompt: str
     wait_sound: str = ""
+    weather_enabled: bool = True
+    weather_timeout: float = 4.0
 
 
 def _env(name: str, default: str) -> str:
@@ -47,4 +49,6 @@ def load_settings() -> Settings:
         history_limit=int(_env("HISTORY_LIMIT", "10")),
         system_prompt=_env("SYSTEM_PROMPT", DEFAULT_SYSTEM_PROMPT),
         wait_sound=_env("WAIT_SOUND", ""),
+        weather_enabled=_env("WEATHER_ENABLED", "true").lower() not in ("0", "false", "no"),
+        weather_timeout=float(_env("WEATHER_TIMEOUT", "4.0")),
     )

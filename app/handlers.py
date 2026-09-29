@@ -1,3 +1,5 @@
+import logging
+
 from app import commands, personalization
 from app.clock import datetime_note
 from app.commands import Command, detect_command, normalize
@@ -12,13 +14,32 @@ from app.personalization import (
 from app.protocol import AliceRequest, build_response
 from app.storage import Storage
 from app.tts import clean_for_speech
+from app.weather import (
+    WEATHER_ASK_CITY,
+    WEATHER_CITY_NOT_FOUND,
+    WEATHER_ERROR,
+    WeatherClient,
+    city_from_entities,
+    format_weather,
+    is_weather_query,
+    parse_weather_query,
+)
+
+logger = logging.getLogger(__name__)
 
 
 class SkillHandler:
-    def __init__(self, settings: Settings, storage: Storage, llm: LlmService):
+    def __init__(
+        self,
+        settings: Settings,
+        storage: Storage,
+        llm: LlmService,
+        weather: WeatherClient | None = None,
+    ):
         self._settings = settings
         self._storage = storage
         self._llm = llm
+        self._weather = weather
 
     async def handle(self, request: AliceRequest) -> dict:
         user_id = request.user_id
@@ -52,6 +73,11 @@ class SkillHandler:
         fact_command = parse_fact_command(raw)
         if fact_command is not None:
             return self._handle_fact(request, user_id, fact_command)
+
+        if self._weather is not None and self._settings.weather_enabled:
+            weather_response = await self._maybe_weather(request, user_id, raw)
+            if weather_response is not None:
+                return weather_response
 
         pending = self._storage.get_pending(user_id)
         if pending is not None:
@@ -88,6 +114,40 @@ class SkillHandler:
             return self._reply(request, commands.PENDING_HINT, tts=self._pending_tts())
         self._storage.add_message(user_id, "assistant", result.text)
         return self._reply(request, result.text)
+
+    async def _maybe_weather(
+        self, request: AliceRequest, user_id: str, raw: str
+    ) -> dict | None:
+        if self._storage.get_fact(user_id, "awaiting_city") and detect_command(raw) is None:
+            self._storage.set_fact(user_id, "city", raw)
+            self._storage.set_fact(user_id, "awaiting_city", "")
+            return await self._weather_answer(request, user_id, raw)
+        if not is_weather_query(raw):
+            return None
+        entities = ((request.raw.get("request") or {}).get("nlu") or {}).get("entities")
+        city = city_from_entities(entities) or parse_weather_query(raw) or ""
+        return await self._resolve_weather(request, user_id, city)
+
+    async def _resolve_weather(
+        self, request: AliceRequest, user_id: str, city: str
+    ) -> dict:
+        city = (city or "").strip() or (self._storage.get_fact(user_id, "city") or "")
+        if not city:
+            self._storage.set_fact(user_id, "awaiting_city", "1")
+            return self._reply(request, WEATHER_ASK_CITY)
+        return await self._weather_answer(request, user_id, city)
+
+    async def _weather_answer(
+        self, request: AliceRequest, user_id: str, city: str
+    ) -> dict:
+        try:
+            weather = await self._weather.get(city)
+        except Exception:
+            logger.exception("weather request failed")
+            return self._reply(request, WEATHER_ERROR)
+        if weather is None:
+            return self._reply(request, WEATHER_CITY_NOT_FOUND.format(city=city))
+        return self._reply(request, format_weather(weather))
 
     def _pending_tts(self) -> str:
         sound = self._settings.wait_sound

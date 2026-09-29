@@ -3,7 +3,7 @@ import asyncio
 import pytest
 
 from app.config import Settings
-from app.llm import AnswerResult, LlmService, extract_delta
+from app.llm import AnswerResult, LlmService, extract_delta, usable_partial
 from app.storage import Storage
 
 
@@ -67,6 +67,38 @@ def test_extract_delta_returns_none_for_non_data_line():
 def test_extract_delta_returns_none_without_content():
     line = 'data: {"choices":[{"delta":{"role":"assistant"}}]}'
     assert extract_delta(line) is None
+
+
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    [
+        ("", False),
+        ("коротко", False),
+        ("Это целое предложение из достаточного числа символов!", True),
+        ("x" * 200, True),
+        ("Это длинное предложение без знака в конце но короткое", False),
+    ],
+)
+def test_usable_partial(text, expected):
+    assert usable_partial(text) is expected
+
+
+async def test_slow_answer_returns_usable_partial_and_remainder(storage):
+    sentence = "Погода сегодня обещает быть тёплой и солнечной."
+    transport = FakeTransport(
+        [sentence, " Обещают до плюс двадцати.", " Хорошего дня!"], delay=0.03
+    )
+    settings = make_settings(request_deadline_seconds=0.05)
+    service = LlmService(settings, storage, transport=transport)
+
+    result = await service.answer("u1", [{"role": "user", "content": "q"}])
+    assert result.is_pending is False
+    assert result.text == sentence
+
+    await service.wait_background()
+    pending = storage.get_pending("u1")
+    assert pending is not None
+    assert pending.answer == "Обещают до плюс двадцати. Хорошего дня!"
 
 
 async def test_answer_returns_full_text_when_fast(storage):

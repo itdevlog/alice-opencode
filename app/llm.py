@@ -17,6 +17,9 @@ logger = logging.getLogger(__name__)
 # HTTP-библиотеки) и передавать стабильный ID диалога в x-opencode-session.
 USER_AGENT = "alice-opencode-skill/1.0"
 
+PARTIAL_MAX_CHARS = 200
+PARTIAL_MIN_CHARS = 40
+
 
 @dataclass
 class AnswerResult:
@@ -42,6 +45,12 @@ def extract_delta(line: str) -> str | None:
     if not content:
         return None
     return content
+
+
+def usable_partial(text: str) -> bool:
+    if len(text) >= PARTIAL_MAX_CHARS:
+        return True
+    return len(text) >= PARTIAL_MIN_CHARS and text[-1] in ".!?…"
 
 
 def chat_completions_url(base: str) -> str:
@@ -128,13 +137,19 @@ class LlmService:
         deadline: float | None = None,
     ) -> AnswerResult:
         timeout = self._settings.request_deadline_seconds if deadline is None else deadline
-        task: asyncio.Task = asyncio.create_task(self._collect(messages, user_id))
+        parts: list[str] = []
+        task: asyncio.Task = asyncio.create_task(self._collect(messages, user_id, parts))
         self._register(task)
         try:
             text = await asyncio.wait_for(asyncio.shield(task), timeout=timeout)
         except TimeoutError:
+            snapshot = "".join(parts)
+            partial = snapshot.strip()
             question = messages[-1]["content"] if messages else ""
             self._storage.save_pending(user_id, question)
+            if usable_partial(partial):
+                self._spawn_remainder(user_id, task, len(snapshot))
+                return AnswerResult(text=partial, is_pending=False)
             self._spawn_background(user_id, task)
             return AnswerResult(text=None, is_pending=True)
         except Exception:
@@ -145,8 +160,9 @@ class LlmService:
             return AnswerResult(text=ERROR_TEXT)
         return AnswerResult(text=text)
 
-    async def _collect(self, messages: list[dict[str, str]], session_id: str) -> str:
-        parts: list[str] = []
+    async def _collect(
+        self, messages: list[dict[str, str]], session_id: str, parts: list[str]
+    ) -> str:
         async for delta in self._transport.stream(messages, session_id):
             parts.append(delta)
         return "".join(parts)
@@ -159,6 +175,22 @@ class LlmService:
                 logger.exception("Background LLM request failed")
                 text = ERROR_TEXT
             self._storage.set_pending_answer(user_id, text)
+
+        self._register(asyncio.create_task(finish()))
+
+    def _spawn_remainder(self, user_id: str, task: asyncio.Task, prefix_len: int) -> None:
+        async def finish() -> None:
+            try:
+                full = await task
+            except Exception:
+                logger.exception("Background LLM request failed")
+                self._storage.pop_pending(user_id)
+                return
+            remainder = full[prefix_len:].strip()
+            if remainder:
+                self._storage.set_pending_answer(user_id, remainder)
+            else:
+                self._storage.pop_pending(user_id)
 
         self._register(asyncio.create_task(finish()))
 

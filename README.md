@@ -1,5 +1,7 @@
 # Навык Алисы → OpenCode Go (DeepSeek)
 
+**🇷🇺 Русский** · **🇬🇧 [English](README.en.md)**
+
 Навык для Яндекс.Алисы: принимает реплики по webhook, получает ответ у
 OpenAI-совместимого API [OpenCode Go](https://opencode.ai/docs/go/) и озвучивает его.
 
